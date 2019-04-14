@@ -1,1 +1,1 @@
-readme
+This is a statistical modeling project that estimates the risk of developing mental health disorders using survival analysis with Cox proportional hazards. The file goes over the signifiance of the project, data processing, exploratory data analysis, and modeling and the interpretation of results. All code was written in R. 
