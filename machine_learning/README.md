@@ -1,1 +1,1 @@
-readme
+This machine learning project aims to predict a repeated suicide attempt (i.e., a subsequent suicide attempt that occurs after a first attempt has failed). The files go over the significance of the project, data processing, exploratory data analysis, modeling, and feature engineering. All code was written in Python.
