@@ -1,0 +1,283 @@
+---
+title: 'High Risk of Mental Health Disorders in Dementia'
+author: 'Amy Lai'
+fontsize: 12pt
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo=T, tidy=T, dev='pdf', tidy.opts=list(width.cutoff=50))
+```
+
+# **Introduction**
+Dementia is a progressive, debilitating brain disease with no cure. With over 5 million individuals currently diagnosed with dementia, dementia is an increasingly prevalent public health issue that is projected to affect more than 7 million indivudals by 2025. 
+
+Treatment for dementia is complex, as the disease often simultaneously occurs with other issues, particularly mental health disorders. Thus, to improve current treatment for patients with dementia, it's especially important to understand the relationship between dementia and mental health disorders. The goal of this project is a step in that direction.
+
+Specifically, among patients with a diagnosis of dementia, we wanted to estimate their risk of developing various mental health disorders (i.e., mood, anxiety, substance use disorders, and suicidal behavior) in the future. Using data from electronic health records (EHR) provided by the largest healthcare system in the United States (i.e., United States Department of Veterans Affairs) for fiscal years (FY 2012 - 2016), we begin by exploring the types of variables that are included, and the analyes that would be the most appropriate.
+
+```{r, warning=F, message=F}
+# Set working directory 
+setwd('//VHASFCAPPGERHSR/Byers/Data/YL analytic/AmyL_Dementia_Psy')
+
+# Load libraries 
+library(survival)
+library(Hmisc)
+library(ggplot2)
+library(knitr)
+
+# Load functions
+read_chunk('functions.r')
+
+# Load data
+df = read.csv('combined_alldata_final_updated.csv')
+```
+
+# **Exploratory Data Analysis**
+The dataset is fairly large. It has over 2.6 million observations and more than 200 variables. The dataset contains variables that indicate if a patient developed the mental health disorders that we're interested in (i.e., the event) or if we were unable to observe whether that patient developed those disorders (i.e., the data was censored). It also has the amount of time that elapsed until the disorders occurred since the start of the study (i.e., the survival time or time-to-event). Furthermore, the dataset contains both lowercase and uppercase variable names that we convert to all lowercase to make the variables easier to work with.
+```{r} 
+# Get dimensions 
+nrow(df)
+ncol(df)
+
+# Inspect dataset
+str(df)
+head(df)
+tail(df)
+
+# Lowercase variable names
+colnames(df) = tolower(colnames(df))
+```
+## Patients
+To get a better understanding of the patient population (and to do a sanity check), we plotted the distributions of socioeconomic factors like age and education. For this sample, all patients were at least 50 years old. The majority of them were male (~93%), white (~77%), married (~64%), and had less than a college education (~60%). There was a fairly equal distriubtion of low, middle, and high income levels. These numbers make sense, considering that these patients are United States veterans.
+```{r, fig.width = 4, fig.height = 4} 
+# Histogram of age
+ggplot(df, aes(x = age_start_round)) + geom_histogram() + 
+  ggtitle('Distribution of age') + 
+  labs(x = 'Age', y = 'Count') 
+
+# Barplot, proportions of sex
+ggplot(df, aes(x = factor(sex))) + geom_bar() + 
+  ggtitle('Distribution of sex') + 
+  labs(x = 'Sex', y = 'Count')
+
+prop.table(table(df$sex))
+
+# Barplot, proportions of race 
+ggplot(df, aes(x = factor(race_csrd_3cat))) + geom_bar() + 
+  ggtitle('Distribution of race-ethnicity') + 
+  labs(x = 'Race-ethnicity', y = 'Count') + 
+  scale_x_discrete(labels = c('1' = 'White', '2' = 'Black', 
+                              '3' = 'Hispanic/others'))
+
+prop.table(table(df$race_csrd_3cat))
+
+# Barplot, proportions of marital status 
+ggplot(df, aes(x = factor(ms))) + geom_bar() + 
+  ggtitle('Distribution of marital status') + 
+  labs(x = 'Marital status', y = 'Count') + 
+  scale_x_discrete(labels = c('M' = 'Married', 'D' = 'Divorced', 
+                              'S' = 'Single', 'W' = 'Widowed', 
+                              'N' = 'Never married', 'A' = 'Separated',
+                              'U' = 'Unknown'))
+prop.table(table(df$ms))
+
+# Barplot of education 
+ggplot(df, aes(x = factor(education_census2013))) + geom_bar() + 
+  ggtitle('Distribution of education') + 
+  labs(x = 'Education level', y = 'Count') + 
+  scale_x_discrete(labels = c('0' = 'Less than high school degree', 
+                              '1' = 'At least high school degree'))
+
+# Barplot of income 
+ggplot(df, aes(x = factor(income_census2013))) + geom_bar() + 
+  ggtitle('Distribution of income') + 
+  labs(x = 'Income level', y = 'Count') + 
+  scale_x_discrete(labels = c('1' = 'Low','2' = 'Middle', '3' = 'High'))
+```
+
+## Dementia
+The barplot shows that there are many more patients without dementia (n = 2,557,276) than those with dementia (n = 125,618). Although this could be an issue for projects with small samples, this project's large sample size still provides a sufficient number of cases for not having and having dementia. Furthermore, the histogram of age by dementia status shows that patients with dementia generally tend to be older than those without dementia. This also makes sense because dementia is a brain disease whose symptoms usually begin to manifest during mid 60s. 
+```{r, fig.width = 4, fig.height = 4} 
+# Barplot, proportion, frequency of dementia status
+ggplot(df, aes(x=factor(anydem_comorbidity))) + geom_bar() + 
+  ggtitle('Distribution of dementia status') + 
+  labs(x = 'Dementia status', y = 'Count') + 
+  scale_x_discrete(labels = c('No dementia', 'Dementia'))
+
+prop.table(table(df$anydem_comorbidity))
+table(df$anydem_comorbidity)
+
+# Histogram of age by dementia status 
+ggplot(df, aes(x = age_start_round, 
+               fill = factor(anydem_comorbidity))) + geom_histogram() +
+  ggtitle('Age by dementia status') + 
+  labs(x = 'Age', y = 'Count') + 
+  scale_fill_discrete(name = '', labels = c('No dementia', 'Dementia'))
+```
+
+## Dementia x Mental health disorders
+The bar graphs of dementia status and mental health disorders show that there were more patients without or with dementia who were censored than who developed the disorders. However, because of the large sample size, we still have a large number of patients with dementia who developed the disorders.
+```{r, fig.width = 4, fig.height = 4} 
+disorders = c('mood', 'anxiety', 'substance use', 'suicidal behavior')
+events = c('mooddis_status_cox', 'anxiety_status_cox', 
+           'substance_status_cox', 'suicide_behavior_status_cox')
+
+# Bar graph of dementia status by mood disorder (code for other
+# disorders not shown due to similar patterns)
+ggplot(df, aes(x = factor(anydem_comorbidity),
+               fill = factor(mooddis_status_cox))) +
+  geom_bar(stat='count', position = position_dodge()) + 
+  ggtitle('Dementia status by mood disorder') + 
+  labs(x = 'Dementia status', y = 'count') + 
+  scale_fill_discrete(labels=c('Censored', 'Developed disorder'))
+
+# Frequency
+<<contingency_table>>
+for (i in 1:length(events)) {
+  print(paste(disorders[i], 'disorders', sep = ' '))
+  contingency_table('anydem_comorbidity', y = events[i], df = df)
+}
+```
+## Dementia x Survival Time of Mental Health Disorders
+To get a sense of whether the distribution of survival time varied by dementia status, we created histograms of dementia status by survival time for each mental health disorder. Overall, patients without demenita had a much stronger negatively skewed distribution of survial time than patients with dementia. This suggests that patients without dementia tend to have longer survival times than patients with dementia.     
+```{r, fig.width = 6, fig.height = 4} 
+# Histogram of demenita status by survival time for mood disorders # (code for other disorders not shown due to similar patterns)
+ggplot(df, aes(x = yearsfollowup_mooddis,
+               fill = factor(anydem_comorbidity))) + 
+  geom_histogram(bins = 5, position='identity') + 
+  ggtitle('Dementia status by survival time for mood disorders') +
+  labs(x = 'Survival time (years)', y = 'Count') + 
+  scale_fill_discrete(name = ' ', labels = c('No dementia', 'Dementia'))
+```
+
+## Recoding variables
+The variables 'sex' and 'marital status' are represented as strings. We recode it into integers to make it easier to work with. 
+```{r} 
+# Recode sex  
+df$gender = ifelse(df$sex == 'F', 1, 2)
+
+# Recode marital status
+df$marital_status = ifelse(df$ms == 'M', 1, 
+                           ifelse(df$ms == 'A'|df$ms == 'D', 2,
+                                  ifelse(df$ms == 'N'|df$ms == 'S', 3, 
+                                         ifelse(df$ms == 'W', 4, 5))))
+```
+
+## Creating variables
+Based on prior research, the timing of the dementia diagnosis (i.e., an older vs. recent diagnosis) may impact the risk of developing mental health disorders especially suicidal behavior. To investigate this more, we created a new variable that differentiates the timing of the dementia diagnosis. An older diagnosis of dementia was defined as a diagnosis that was made between FY 2008 - FY 2011, while a more recent diagnosis was a diagnosis made during FY 2012 - FY 2013. 
+```{r} 
+# Create timing of dementia variable 
+df$dementia_time = ifelse(df$anydem_comorbidity == 1, 
+                          yes = ifelse(df$dementia_history == 1, yes =
+                                         1, no = 2), no = 0)
+```
+
+## Create final dataframe 
+The dataset contains many additional variables that aren't appropriate for our purposes. To reduce computational resources, we created a final dataset that contains the all variables that are important to use.
+```{r} 
+# Continuous variables
+cont_vars = c('age_start_round','age_end_mooddis_round',
+              'age_end_anxiety_round', 'age_end_substance_round',
+              'age_end_suicide_behavior_round', 
+              'age_end_suicide_death_round', 'mooddis_status_cox', 
+              'anxiety_status_cox', 'substance_status_cox',
+              'suicide_behavior_status_cox',
+              'suicide_death_status_cox')
+
+# Categorial variables 
+categ_vars = c('anydem_comorbidity', 'dementia_history',
+               'anydem_comorbidity_new', 'dementia_time',
+               'gender', 'race_csrd_3cat', 'marital_status', 
+               'education_census2013', 'income_census2013',
+               'hyperten_comorbidity', 'mi_comorbidity',
+               'cvd_comorbidity', 'csrdtbi_comorbidity', 
+               'pd_comorbidity', 'dm_comorbidity',
+               'obesity_comorbidity', 'sleepissue_comorbidity',
+               'pain_comorbidity')
+
+# Final dataset
+cont_df = df[, cont_vars]
+categ_df = data.frame(sapply(df[, categ_vars], FUN = factor))
+final_df = data.frame(cont_df, categ_df)
+
+# Check missing values 
+<<get_missing>>
+sapply(final_df, FUN = get_missing)
+```
+
+# **Statistical Analyses**
+Based on the information in the dataset, we used survival analyses to estimate the impact of having dementia on the risk of developing mental health disorders. Specifically, we first estimate the Kaplan-Meir survival function to compare the probabilities that patients with and without dementia would develop each disorder. For a more intuitive interpretation, age (in years) at dementia diagnosis was used as the start of the study (i.e., time origin) and age at first diagnosis of each disorder was used as the survival time.  
+
+Overall, the survival functions show that patients with dementia tend to have a higher probability of developing mental health disorders than patients without dementia. Specifically, those with dementia seemed to have a much higher probability of developing mood and anxiety disorders than substance use disorders or suicidal behavior.
+```{r} 
+# Define variables 
+predictors = c('anydem_comorbidity', 'gender', 'race_csrd_3cat', 
+               'education_census2013', 'income_census2013',
+               'hyperten_comorbidity', 'mi_comorbidity',
+               'cvd_comorbidity', 'csrdtbi_comorbidity', 
+               'pd_comorbidity', 'dm_comorbidity',
+               'obesity_comorbidity', 'sleepissue_comorbidity',
+               'pain_comorbidity')
+
+start_time = c('age_start_round')
+
+end_times = c('age_end_mooddis_round', 'age_end_anxiety_round', 
+              'age_end_substance_round',
+              'age_end_suicide_behavior_round')
+
+events = c('mooddis_status_cox', 'anxiety_status_cox', 
+           'substance_status_cox', 'suicide_behavior_status_cox')
+
+groups = c('anydem_comorbidity')
+
+titles = c('any mood disorders', 'any anxiety disorders', 
+           'any substance use disorders', 'any suicidal behavior')
+
+# Estimate Kaplan-Meir survival function
+<<km_mod>>
+km_models = list()
+for (i in 1:length(events)){
+  km_models[[i]] = km_mod(start = start_time[1], end = end_times[i], 
+                          event = events[i], group = groups[1], df =
+                            final_df)
+}
+
+<<plot_survival>>
+for (i in 1:length(km_models)){
+  plot_survival(km_models[[i]], xlim = c(50,105), ylim = c(0,1), 
+                position = 'topleft', 
+                groups = c('No dementia', 'Dementia'), 
+                title = titles[i])
+}
+```
+Next, we fit a Cox proportional hazard model to estimate the hazard ratio for patients with and without dementia in developing each disorder. The ages used for computing the survival functions were also used to fit these models. All analyses adjusted for important medical and sociodemographic factors (e.g., traumatic brain injury, income, marital status) that can affect the risk of these disorders. 
+
+Compared to those without dementia, patients with dementia showed a  roughly 2-fold increased risk of mood (Hazard Ratio [HR]: 2.19, 95% Wald CI: 2.15-2.24, p<.001) and anxiety (HR: 1.56, 95% CI: 1.50-1.63, p<.001) disorders. Interestingly, patients with and without dementia showed no evidence of having different risks of substance use disorders and suicidal behavior.
+```{r} 
+<<cox_mod>>
+for (i in 1:length(end_times)){
+  mod = cox_mod(start = start_time[1], end = end_times[i], 
+                event = events[i], 
+                df = final_df)
+  print(mod)
+}
+```
+To see whether the timing of dementia diagnosis further affected these results, we used a similar approach for each disorder. As suspected, patients with a more recent diagnosis of dementia showed the highest risk of mood, anxiety, and substance use disorders. These patients had nearly a 3-fold higher risk of mood disorders than those without dementia (HR: 2.46, 95% CI: 2.40-2.52, p<.001), and almost a 1-fold higher risk than those with an older diagnosis. We found similar patterns for anxiety and substance use disorders. (Due to the similarity of the code that was shown before, the code for these analyses are not shown.)
+
+Finally, we checked whether the assumptions of the Cox model were met. Most importantly, the model assumes proportional hazards in which the hazard ratio is constant across all time points of the study. However, because statistical tests for proportional hazards tend to be sensitive to the sample size, they often reject the null hypothesis (i.e., hazard ratio is proportional) in the case of large samples like the one used in this project. Thus, to check for potential confounders that may impact the hazard ratio, we conducted subgroup analyses of each variable in the model and compared the hazard ratios for dementia status for each disorder.
+
+The hazard ratios for dementia status were similar across all levels of all variables for each disorder, suggesting that our estimated hazard ratios for patients with dementia in developing mental health disorders are relatively consistent. 
+```{r} 
+<<subset_data>>
+df_lst = subset_data('pain_comorbidity', df = final_df)
+
+for (i in 1:length(end_times)){
+  for (j in 1:length(df_lst)){
+    model = cox_mod(start = start_time[1], end = end_times[i], 
+                    event = events[i], df = df_lst[[j]])
+    print(model)
+  }
+}
+```
+# **Conclusions**
+Using EHR data from the largest healthcare system in the United States, we used survival analyses to estimate the impact of having dementia on the risk of developing mental health disorders. The results show that patients with dementia have an increased risk of mental health disorders, especially those with a more recent diagnosis of dementia. This highlights the critical need for better integration of mental health treatment in caring for patients with dementia.
